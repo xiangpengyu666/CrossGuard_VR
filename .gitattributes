@@ -1,0 +1,19 @@
+# Normalize line endings
+* text=auto
+
+# Unity YAML assets: use Unity's smart merge (configure UnityYAMLMerge in git config)
+*.unity   merge=unityyamlmerge eol=lf
+*.asset   merge=unityyamlmerge eol=lf
+*.prefab  merge=unityyamlmerge eol=lf
+*.meta    merge=unityyamlmerge eol=lf
+
+# Source stays LF
+*.cs      text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+
+# Binary assets
+*.png     binary
+*.jpg     binary
+*.wlt     binary
+*.unitypackage binary
