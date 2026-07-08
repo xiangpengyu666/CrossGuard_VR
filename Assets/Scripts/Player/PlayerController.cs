@@ -14,7 +14,11 @@ namespace CrossGuard
     {
         [Header("Movement")]
         public float moveSpeed = 4.5f;
+        [Tooltip("Speed multiplier while the sprint key is held.")]
+        public float sprintMultiplier = 1.8f;
         public float gravity = -9.81f;
+        [Tooltip("Upward launch velocity for a jump (m/s).")]
+        public float jumpSpeed = 5f;
 
         [Header("Look")]
         public float mouseSensitivity = 2f;
@@ -37,11 +41,13 @@ namespace CrossGuard
             HandleMove();
         }
 
-        // --- input isolation: the only two methods XR replaces ---
+        // --- input isolation: the methods XR replaces (thumbstick / buttons) ---
         Vector2 ReadMoveInput() => new Vector2(Input.GetAxisRaw("Horizontal"),
                                                Input.GetAxisRaw("Vertical"));
         Vector2 ReadLookInput() => new Vector2(Input.GetAxis("Mouse X"),
                                                Input.GetAxis("Mouse Y"));
+        bool ReadSprintInput() => Input.GetKey(KeyCode.LeftShift);
+        bool ReadJumpInput()   => Input.GetButtonDown("Jump");   // Space by default
 
         void HandleLook()
         {
@@ -57,10 +63,15 @@ namespace CrossGuard
             Vector3 move = transform.right * m.x + transform.forward * m.y;
             if (move.sqrMagnitude > 1f) move.Normalize();
 
-            _velocity.x = move.x * moveSpeed;
-            _velocity.z = move.z * moveSpeed;
+            float speed = moveSpeed * (ReadSprintInput() ? sprintMultiplier : 1f);
+            _velocity.x = move.x * speed;
+            _velocity.z = move.z * speed;
 
-            if (_cc.isGrounded && _velocity.y < 0f) _velocity.y = -2f;
+            if (_cc.isGrounded)
+            {
+                if (_velocity.y < 0f) _velocity.y = -2f;   // stick to the ground
+                if (ReadJumpInput()) _velocity.y = jumpSpeed;
+            }
             _velocity.y += gravity * Time.deltaTime;
 
             _cc.Move(_velocity * Time.deltaTime);
