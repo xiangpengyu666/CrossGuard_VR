@@ -51,6 +51,8 @@ Unity 第一人称对抗机器人原型。纯 Unity 跑通玩法，架构上预�
 > 约定（用户要求）：所有新编辑都要记录进本文件。
 
 ### 2026-07-08
+- 把《英雄联盟》希瓦娜(骸骨之爪)模型做成 boss 资产并接上追击/攻击：① 用 Blender 5.1 无界面把 `骸骨之爪_希瓦娜.glb` 转 `Assets/Shyvana_Dragonslayer.fbx`(Generic rig，48 动画)；② FBX 内嵌贴图失败(白模)，从 glb 抽出 1024² 漫反射图存 `Assets/ShyvanaTextures/`，建 URP/Lit 材质 `Shyvana_Body.mat` 并用 ModelImporter 材质重映射持久接上；③ 场景实例 `Shyvana_Boss` 缩放 0.01(约 3.4m 高)、脚落地、面向玩家、加 Animator；④ 把 Idle/Run 类 clip 设循环，建 `Assets/Shyvana_Boss.controller`(状态 Idle/Run/Attack/Death，参数 Speed/Attack/Die)；⑤ 新增 `Enemy/BossChaser.cs`：按 tag 找玩家、直接转向追击(驱动 Speed)、进入 attackRange 停下并按冷却触发 Attack(不依赖 NavMesh 烘焙)。攻击目前仅播动画，未接 PlayerHealth 伤害。注：希瓦娜是 Riot 版权模型，仅作原型占位。（文件：`Assets/Shyvana_Dragonslayer.fbx`、`Assets/ShyvanaTextures/*`、`Assets/Shyvana_Boss.controller`、`Assets/Scripts/Enemy/BossChaser.cs`、`Assets/Scenes/SampleScene.unity`）
+- 用 UnityMCP 直接在场景里装配玩家（不再需要手点菜单）：执行菜单 `CrossGuard > Setup First-Person Player` 生成 `Player`(CharacterController + PlayerController + Main Camera 收编为眼高 1.6 子相机)，并保存场景。（文件：`Assets/Scenes/SampleScene.unity`）
 - 搭建可自由跑动的第一人称玩家。给 `Player/PlayerController.cs` 增加奔跑(LeftShift，`sprintMultiplier`)和跳跃(`Jump`/Space，`jumpSpeed`)，两处新输入按接缝约定隔离进 `ReadSprintInput()`/`ReadJumpInput()`，跳跃仅在 `isGrounded` 时触发。发现场景里根本没有玩家(只有做物理测试的 TestCube)，因 Unity MCP 授权被撤销无法直接拖搭，故新增编辑器脚本 `Editor/PlayerSetup.cs`：菜单 `CrossGuard > Setup First-Person Player` 一键装配 Player(CharacterController h=1.8/r=0.3 + PlayerController)并把 Main Camera 重挂为眼高 1.6 的子相机，带 Undo、可重复运行。用户需在 Unity 里点该菜单完成场景装配。（文件：`Assets/Scripts/Player/PlayerController.cs`、`Assets/Scripts/Editor/PlayerSetup.cs`、`CLAUDE.md`）
 
 ### 2026-07-07
