@@ -29,31 +29,38 @@ namespace CrossGuard
         [Tooltip("How long the attack animation runs. The boss is locked in place " +
                  "(no move, no turn) from the moment the attack fires until this elapses.")]
         public float attackDuration = 1f;
+        [Tooltip("Damage dealt to the player if they're inside the attack shape at the " +
+                 "impact (flash) moment.")]
+        public float attackDamage = 15f;
 
         [Header("Telegraph")]
         [Tooltip("Optional: ground attack-range indicators shown per attack.")]
         public BossTelegraph telegraph;
 
-        [Header("Transform (demon form)")]
-        [Tooltip("If true, the boss transforms once after being engaged this long.")]
-        public bool canTransform = true;
-        [Tooltip("Seconds of combat before the one-time transformation triggers.")]
-        public float transformAfterSeconds = 6f;
-        [Tooltip("Length of the transform intro (Taunt_Intro). Boss is locked in " +
-                 "place while it plays, then holds in the demon idle.")]
-        public float transformDuration = 2.8f;
-        [Tooltip("Lower the boss by this many meters once the demon form settles " +
-                 "(the demon idle pose sits lower).")]
+        [Header("Transform (demon form — triggered when life 1 is depleted)")]
+        [Tooltip("Length of the transform intro (Taunt_Intro, played at 0.5x). Boss is " +
+                 "locked & invulnerable while it plays, then enters the demon form.")]
+        public float transformDuration = 5.6f;
+        [Tooltip("Lower the boss by this many meters once the demon form settles.")]
         public float transformHeightDrop = 0.3f;
 
+        [Header("Phase-2 buff (applied when the demon form settles)")]
+        public float buffDamageMul = 1.8f;
+        public float buffSpeedMul = 1.3f;
+        public float buffCooldownMul = 0.65f;
+
         Animator _anim;
+        PlayerHealth _playerHealth;
+        BossHealth _bossHealth;
         float _cooldown;
         bool _attacking;
         float _attackTimer;
+        bool _hitResolved;
+        float _impactAt;
+        int _pendingShape;
         bool _transforming;
         bool _transformed;
         float _transformTimer;
-        float _engaged;
 
         static readonly int SpeedHash          = Animator.StringToHash("Speed");
         static readonly int TransformStateHash = Animator.StringToHash("Transform");
@@ -72,6 +79,37 @@ namespace CrossGuard
             }
             if (telegraph != null && telegraph.bossAnimator == null)
                 telegraph.bossAnimator = _anim;
+            if (player != null) _playerHealth = player.GetComponent<PlayerHealth>();
+            _bossHealth = GetComponent<BossHealth>();
+        }
+
+        void OnEnable()
+        {
+            if (_bossHealth != null) _bossHealth.OnPhaseAdvance += StartTransform;
+        }
+
+        void OnDisable()
+        {
+            if (_bossHealth != null) _bossHealth.OnPhaseAdvance -= StartTransform;
+        }
+
+        // Life 1 depleted -> play the transform, locked & invulnerable.
+        void StartTransform()
+        {
+            if (_transforming || _transformed) return;
+            _anim.Play(TransformStateHash, 0, 0f);
+            _anim.SetFloat(SpeedHash, 0f);
+            _transforming = true;
+            _transformTimer = transformDuration;
+            _attacking = false;
+            if (_bossHealth != null) _bossHealth.Invulnerable = true;
+        }
+
+        void ApplyPhase2Buff()
+        {
+            attackDamage   *= buffDamageMul;
+            moveSpeed      *= buffSpeedMul;
+            attackCooldown *= buffCooldownMul;
         }
 
         void Update()
@@ -83,13 +121,22 @@ namespace CrossGuard
             if (_attacking)
             {
                 _anim.SetFloat(SpeedHash, 0f);
+                // Resolve the hit exactly at the impact/flash moment (the telegraph's
+                // strike point). If the player is inside the attack shape, deal damage
+                // -> PlayerHealth raises OnPlayerHit (SEAM #1 -> future haptic band).
+                float elapsed = attackDuration - _attackTimer;
+                if (!_hitResolved && elapsed >= _impactAt)
+                {
+                    _hitResolved = true;
+                    ResolveAttackHit();
+                }
                 _attackTimer -= Time.deltaTime;
                 if (_attackTimer <= 0f) _attacking = false;
                 return;
             }
 
-            // Transforming: locked in place through the Taunt_Intro, then flip to the
-            // demon form (holds in ULT_Idle).
+            // Transforming: locked & invulnerable through Taunt_Intro, then enter the
+            // buffed demon form and refill the bar for phase 2.
             if (_transforming)
             {
                 _anim.SetFloat(SpeedHash, 0f);
@@ -99,6 +146,12 @@ namespace CrossGuard
                     _transforming = false;
                     _transformed = true;
                     transform.position -= new Vector3(0f, transformHeightDrop, 0f);
+                    ApplyPhase2Buff();
+                    if (_bossHealth != null)
+                    {
+                        _bossHealth.Invulnerable = false;
+                        _bossHealth.BeginNextPhase();   // refill to full for life 2
+                    }
                 }
                 return;
             }
@@ -109,22 +162,6 @@ namespace CrossGuard
             float dist = to.magnitude;
 
             FacePlayer(to);
-
-            // one-time transformation after enough time engaged
-            if (canTransform && !_transformed)
-            {
-                _engaged += Time.deltaTime;
-                if (_engaged >= transformAfterSeconds)
-                {
-                    // Play the state directly (robust) rather than a trigger; the
-                    // Transform state auto-advances to the looping demon idle.
-                    _anim.Play(TransformStateHash, 0, 0f);
-                    _transforming = true;
-                    _transformTimer = transformDuration;
-                    _anim.SetFloat(SpeedHash, 0f);
-                    return;
-                }
-            }
 
             _cooldown -= Time.deltaTime;
 
@@ -144,17 +181,30 @@ namespace CrossGuard
                     string[] pool = _transformed ? DemonAttacks : NormalAttacks;
                     string atk = pool[Random.Range(0, pool.Length)];
                     _anim.Play(atk, 0, 0f);
-                    if (telegraph != null)
-                    {
-                        // Q1/ULT_Q1 -> rect, Q2 -> arc, Q3 -> circle
-                        int shape = atk.EndsWith("Q1") ? 0 : atk.EndsWith("Q2") ? 1 : 2;
-                        telegraph.Show(shape, attackDuration, atk);
-                    }
+                    // Q1/ULT_Q1 -> rect, Q2 -> arc, Q3 -> circle
+                    _pendingShape = atk.EndsWith("Q1") ? 0 : atk.EndsWith("Q2") ? 1 : 2;
+                    if (telegraph != null) telegraph.Show(_pendingShape, attackDuration, atk);
                     _cooldown = attackCooldown;
                     _attacking = true;          // lock position for the swing
                     _attackTimer = attackDuration;
+                    _hitResolved = false;
+                    _impactAt = attackDuration *
+                                (telegraph != null ? telegraph.impactFraction : 0.45f);
                 }
             }
+        }
+
+        void ResolveAttackHit()
+        {
+            if (_playerHealth == null) return;
+            bool hit;
+            if (telegraph != null)
+                hit = telegraph.IsPointInShape(_pendingShape, player.position);
+            else
+                hit = Vector3.Distance(transform.position, player.position) <= attackRange;
+
+            if (hit)
+                _playerHealth.TakeDamage(attackDamage, transform.position);
         }
 
         void FacePlayer(Vector3 to)

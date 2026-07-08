@@ -20,6 +20,13 @@ namespace CrossGuard
         public GameObject arcIndicator;     // Q2
         public GameObject circleIndicator;  // Q3
 
+        [Header("Shape sizes (must match the built meshes; used for hit tests)")]
+        public float rectLength = 6.5f;
+        public float rectWidth = 1.6f;
+        public float arcRadius = 4.5f;
+        public float arcHalfAngleDeg = 75f;
+        public float circleRadius = 4f;
+
         [Header("Sync")]
         [Tooltip("Boss Animator the windup reads its progress from (kept in lock-step " +
                  "with the actual attack animation). Falls back to a timer if unset.")]
@@ -71,6 +78,24 @@ namespace CrossGuard
             if (circleIndicator) circleIndicator.SetActive(false);
             _active = null;
             _activeRenderer = null;
+        }
+
+        /// True if a world point falls inside the given attack shape, tested in this
+        /// telegraph's local frame (so it always matches what's drawn on the ground).
+        ///   0 = rect (forward), 1 = arc (forward), 2 = circle (around boss)
+        public bool IsPointInShape(int shape, Vector3 worldPoint)
+        {
+            Vector3 p = transform.InverseTransformPoint(worldPoint);
+            p.y = 0f;
+            if (shape == 0)                                   // forward rectangle
+                return p.z >= 0f && p.z <= rectLength && Mathf.Abs(p.x) <= rectWidth * 0.5f;
+            if (shape == 1)                                   // forward arc/sector
+            {
+                if (new Vector2(p.x, p.z).magnitude > arcRadius) return false;
+                float ang = Mathf.Atan2(p.x, p.z) * Mathf.Rad2Deg;   // 0 = straight ahead
+                return Mathf.Abs(ang) <= arcHalfAngleDeg;
+            }
+            return new Vector2(p.x, p.z).magnitude <= circleRadius;  // ring around boss
         }
 
         void ApplyWindup(float fill, float flash)
