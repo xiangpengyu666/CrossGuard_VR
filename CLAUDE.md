@@ -55,7 +55,10 @@
 - **UI**
   - `UI/HealthBarUI.cs` — 血条（绑 BossHealth 或玩家 `OnPlayerHealthChanged`），初值在 `Start` 读。
   - `UI/DamageFlashUI.cs` — 受击红色闪屏（SEAM #1 订阅者）。**VR 安全、可留用**。
-- **Integration** — `Integration/HapticBandListener.cs`：SEAM #1 示例订阅者（当前仅日志，将来接手环）。
+- **Integration**（SEAM #1 硬件桥，已跑通）
+  - `Integration/IHapticTransport.cs` — 触觉传输接口（和 `IEnemyPoseSource` 同构）。
+  - `Integration/UdpHapticTransport.cs` — UDP 实现：发 `"强度 时长"` 到腰带:8888、监听 8889 心跳。
+  - `Integration/HapticBandListener.cs` — 订阅 `OnPlayerHit`，映射→经 transport 发腰带；心跳断连暂停游戏。
 - **Editor** — `Editor/PlayerSetup.cs`：菜单 `CrossGuard > Setup First-Person Player` 一键装配玩家。
 - **Shader/FX** — `Assets/BossFX/Telegraph.shader`（`CrossGuard/Telegraph`，蓄力填充/亮边/闪光）。
 
@@ -64,7 +67,8 @@
 - **`Player`**（CharacterController + PlayerController + PlayerHealth，tag `Player`）。子物体：`Main Camera`（眼高 1.6 + `CameraShake`）；相机上的剑 viewmodel `WeaponPivot`（→ `ViewModel_Sword` + 占位手臂 `ViewModel_Arms`，`SwordSwing` 左键劈）；隐藏的全身 `PlayerBody`（易大师，藏了 Head 骨骼）。
 - **`Aatrox_Boss`**（亚托克斯，~3.2m，脚在地板顶 y≈0.5）：Animator + `Aatrox_Boss.controller` + `BossChaser` + `BossHealth`(600HP×2命) + 子物体 `HitCapsule`(反缩放胶囊碰撞体) + 关联 `Aatrox_Telegraph`。
 - **`Aatrox_Telegraph`**：`BossTelegraph` + 三指示器（Q1_Rect / Q2_Arc / Q3_Circle）。
-- **`GameHUD`**（Screen-Space Overlay Canvas）：`BossBar`(顶,红,`HealthBarUI`) + `PlayerBar`(左下,绿) + `HitFlash`(全屏红,`DamageFlashUI`)。
+- **`GameHUD`**（Screen-Space Overlay Canvas + CanvasScaler 1920×1080）：`BossBar`(顶,红,`HealthBarUI`) + `PlayerBar`(左下,绿) + `HitFlash`(全屏红,`DamageFlashUI`)。
+- **`HapticBridge`**：`UdpHapticTransport`(beltIp=172.20.10.2) + `HapticBandListener`（腰带 SEAM #1 桥）。
 - **场地**：若干 Cube 拼的墙 + 地板（地板顶面约 y=0.5）。
 - 注：`Shyvana_Boss` 曾在场景、**现已移除**（资产仍在，可重新放）。
 
@@ -96,6 +100,10 @@
 ## 编辑记录 (Changelog)
 
 > 每次对该项目做出编辑后，在此**按时间倒序**追加一条：日期、改了什么、为什么、涉及文件。
+
+### 2026-07-14
+- **触觉腰带集成打通（SEAM #1 硬件半边首次跑通）**：Unity 侧 `Integration/IHapticTransport.cs`(接口，和 `IEnemyPoseSource` 同构) + `Integration/UdpHapticTransport.cs`(UDP 发后不管，`"0.90 200"` ASCII 包 → 腰带:8888；监听 8889 收 1Hz 心跳，非阻塞 socket 不卡主循环) + `Integration/HapticBandListener.cs`(订阅 `OnPlayerHit`，HitType→强度/时长映射；心跳静默 >3s 且曾收到过 → `Time.timeScale=0` 暂停，因为静默失效的触觉比没有更糟)。场景建 `HapticBridge` 物体挂 `UdpHapticTransport`+`HapticBandListener` 接好线（`beltIp=172.20.10.2`）。ESP32 固件（桌面 `ESP32_Belt/esp32_belt_net/`，不在本仓库）在原串口包络版上加了 WiFi + UDP 收命令 + 1Hz 心跳广播。**实测**：电脑与腰带同连 iPhone 热点(纯英文名 Positive/172.20.10.x 同网段)，Unity 直发 UDP → 腰带串口 `hit level=229 dur=500` 触发包络、`dropped(refractory)` 防抖正常 → 整条链路验证通过。（文件：`Assets/Scripts/Integration/*`、`Assets/Scenes/SampleScene.unity`）
+- HUD 血条随屏幕比例跑位（换屏就不见）：给 `GameHUD` Canvas 加 `CanvasScaler`(ScaleWithScreenSize，参考 1920×1080，match 0.5)，任意分辨率/比例血条稳定不跑位。（文件：`Assets/Scenes/SampleScene.unity`）
 
 ### 2026-07-08
 - 受击视觉反馈（都挂在 `GameEvents.OnPlayerHit`/SEAM #1 上，可插拔）：① 新增 `Player/CameraShake.cs`（挂 Main Camera）——被击中用 Perlin 噪声抖镜头，按 HitType 分强度、`LateUpdate` 叠加不干扰视角、随时间衰减；② 新增 `UI/DamageFlashUI.cs` + HUD 全屏红图 `HitFlash`——屏幕闪红后淡出。**VR 迁移**：摄像机震颤在 VR 会晕、要禁用；红闪 + 触觉手环是 VR 安全反馈、直接留用（同一事件后面换响应器，逻辑零改动）。（文件：`Assets/Scripts/Player/CameraShake.cs`、`Assets/Scripts/UI/DamageFlashUI.cs`、`Assets/Scenes/SampleScene.unity`）
